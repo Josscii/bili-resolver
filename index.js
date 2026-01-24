@@ -1,16 +1,18 @@
 /**
- * Bilibili Resolver & Proxy Worker
+ * Bilibili Resolver & Proxy Worker (v2.0)
+ * 支持：BV号 / b23.tv短链 / 完整URL 解析
+ * 
  * 路由规则：
  * - /               : 解析 UI 界面
+ * - /api/any?text=  : 智能解析接口 (支持 b23.tv/BV/URL)
  * - /BVxxxxxx       : 直接 302 重定向到视频流
- * - /json/BVxxxxxx  : 获取解析结果 JSON
  * - /proxy?url=...  : 视频流中转代理
  */
 
 const REFERER = 'https://www.bilibili.com/';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
-// --- WBI 加密核心算法 ---
+// --- WBI 加密核心算法 (保持不变) ---
 const mixinKeyEncTab = [
     46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49,
     33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13, 37, 48, 7, 16, 24, 55, 40,
@@ -39,11 +41,40 @@ async function signWbi(params) {
     return query + `&w_rid=${w_rid}`;
 }
 
+// --- [新增] ID 提取与短链解析逻辑 ---
+async function extractBvid(text) {
+    // 1. 尝试直接匹配 BV 号
+    let match = text.match(/(BV[a-zA-Z0-9]{10})/);
+    if (match) return match[1];
+
+    // 2. 尝试解析 b23.tv 短链
+    // 匹配如: https://b23.tv/xxx 或 文本中的 b23.tv/xxx
+    const b23Match = text.match(/b23\.tv\/([a-zA-Z0-9]+)/);
+    if (b23Match) {
+        try {
+            const shortUrl = `https://b23.tv/${b23Match[1]}`;
+            // 发起请求，fetch 会自动跟随 302 重定向
+            const res = await fetch(shortUrl, {
+                method: 'HEAD', // 使用 HEAD 请求减少流量
+                redirect: 'follow',
+                headers: { 'User-Agent': UA }
+            });
+            // 从最终 URL (res.url) 中提取 BV 号
+            match = res.url.match(/(BV[a-zA-Z0-9]{10})/);
+            if (match) return match[1];
+        } catch (e) {
+            console.error('B23 parse error:', e);
+        }
+    }
+    
+    throw new Error("未能识别有效的 BV 号或 b23.tv 链接");
+}
+
 // --- 后端解析引擎 ---
 async function resolveBili(bvid, qn, host) {
     const vRes = await fetch(`https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`, { headers: { 'User-Agent': UA } });
     const vData = await vRes.json();
-    if (vData.code !== 0) throw new Error(vData.message);
+    if (vData.code !== 0) throw new Error(vData.message || "视频信息获取失败");
 
     const { cid, title, pic } = vData.data;
     const signedQuery = await signWbi({ bvid, cid, qn: qn || 80, fnval: 1 });
@@ -51,7 +82,7 @@ async function resolveBili(bvid, qn, host) {
         headers: { 'User-Agent': UA, 'Referer': REFERER }
     });
     const pData = await pRes.json();
-    if (pData.code !== 0) throw new Error("解析地址失败");
+    if (pData.code !== 0) throw new Error("视频地址解析失败");
 
     const rawUrl = pData.data.durl[0].url;
     const playableUrl = `${host}/proxy?url=${encodeURIComponent(rawUrl)}`;
@@ -59,7 +90,7 @@ async function resolveBili(bvid, qn, host) {
     return { title, pic, bvid, cid, rawUrl, playableUrl };
 }
 
-// --- UI 界面 ---
+// --- UI 界面 (已更新 JS 逻辑) ---
 const UI = (host) => `
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -76,11 +107,11 @@ const UI = (host) => `
     <div class="max-w-xl w-full space-y-6">
         <div class="text-center space-y-2">
             <h1 class="text-4xl font-black text-blue-500 italic tracking-tighter">BILIBILI PARSER</h1>
-            <p class="text-slate-500 text-[10px] font-bold tracking-[0.3em] uppercase">High Definition Resolution</p>
+            <p class="text-slate-500 text-[10px] font-bold tracking-[0.3em] uppercase">b23.tv / BV / URL Support</p>
         </div>
 
         <div class="glass p-6 rounded-3xl space-y-4 shadow-2xl">
-            <input type="text" id="input" placeholder="输入视频链接或 BV 号..." 
+            <input type="text" id="input" placeholder="粘贴 b23.tv 分享文本或 BV 号..." 
                 class="w-full bg-slate-800/50 border border-slate-700 rounded-2xl px-5 py-4 focus:ring-2 focus:ring-blue-500 outline-none transition-all">
             
             <div class="flex gap-3">
@@ -94,7 +125,7 @@ const UI = (host) => `
             </div>
         </div>
 
-        <div id="loader" class="hidden text-center py-6 animate-pulse text-blue-400 font-bold">处理中...</div>
+        <div id="loader" class="hidden text-center py-6 animate-pulse text-blue-400 font-bold">正在分析链接...</div>
 
         <div id="result" class="hidden glass p-6 rounded-3xl space-y-6">
             <div class="flex gap-4">
@@ -129,17 +160,20 @@ const UI = (host) => `
         }
 
         async function doParse() {
-            const input = document.getElementById('input').value;
-            const bvid = input.match(/(BV[a-zA-Z0-9]{10})/)?.[1];
+            const inputVal = document.getElementById('input').value;
             const qn = document.getElementById('qn').value;
-            if(!bvid) return alert('请输入有效链接');
+            
+            if(!inputVal) return alert('请输入内容');
             
             document.getElementById('loader').classList.remove('hidden');
             document.getElementById('result').classList.add('hidden');
 
             try {
-                const res = await fetch(\`/json/\${bvid}?qn=\${qn}\`);
+                // 直接发送原始文本到后端智能解析接口
+                const params = new URLSearchParams({ text: inputVal, qn: qn });
+                const res = await fetch(\`/api/any?\${params.toString()}\`);
                 const data = await res.json();
+                
                 if(data.status === 'success') {
                     document.getElementById('resPic').src = data.pic.replace('http:', 'https:');
                     document.getElementById('resTitle').innerText = data.title;
@@ -147,9 +181,16 @@ const UI = (host) => `
                     document.getElementById('link').value = data.playableUrl;
                     document.getElementById('play').href = data.playableUrl;
                     document.getElementById('result').classList.remove('hidden');
-                } else { alert('解析失败'); }
-            } catch(e) { alert('请求出错'); }
-            finally { document.getElementById('loader').classList.add('hidden'); }
+                } else { 
+                    alert('解析失败: ' + (data.message || '未知错误')); 
+                }
+            } catch(e) { 
+                console.error(e);
+                alert('请求出错，请检查网络'); 
+            }
+            finally { 
+                document.getElementById('loader').classList.add('hidden'); 
+            }
         }
     </script>
 </body>
@@ -175,7 +216,26 @@ export default {
             return new Response(UI(host), { headers: { 'Content-Type': 'text/html;charset=UTF-8' } });
         }
 
-        // 3. JSON 模式 (/json/BV...)
+        // 3. [新增] 智能解析接口 (处理 b23.tv / BV / URL)
+        if (path === '/api/any') {
+            const text = url.searchParams.get('text');
+            const qn = url.searchParams.get('qn') || 80;
+            if (!text) return new Response(JSON.stringify({ status: 'error', message: 'Missing text' }), { status: 400 });
+
+            try {
+                // 自动识别 BV 或 b23
+                const bvid = await extractBvid(text);
+                // 进行解析
+                const res = await resolveBili(bvid, qn, host);
+                return new Response(JSON.stringify({ status: 'success', ...res }), {
+                    headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+                });
+            } catch (e) {
+                return new Response(JSON.stringify({ status: 'error', message: e.message }), { status: 500 });
+            }
+        }
+
+        // 4. 兼容旧接口 /json/BV...
         if (path.startsWith('/json/BV')) {
             const bvid = path.split('/')[2];
             const qn = url.searchParams.get('qn') || 80;
@@ -189,7 +249,7 @@ export default {
             }
         }
 
-        // 4. 直接跳转播放 (/BV...)
+        // 5. 直接跳转播放 (/BV...)
         if (path.startsWith('/BV')) {
             const bvid = path.slice(1);
             const qn = url.searchParams.get('qn') || 80;
