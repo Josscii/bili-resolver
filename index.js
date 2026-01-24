@@ -1,16 +1,16 @@
 /**
- * Bilibili Resolver & Proxy Worker (v2.5 Universal Path)
+ * Bilibili Resolver & Proxy Worker (v2.7 Refined)
  * 
- * 新增功能：
- * 1. 万能路径解析：支持 /【视频标题】 https://b23.tv/xxx 这种混合文本直接访问
- * 2. 自动提取逻辑：无论路径里混杂了什么中文或符号，只要包含 BV号 或 b23.tv 链接即可识别
- * 3. 继承 v2.4 的所有 UI 和下载功能
+ * 版本特性：
+ * 1. Quest 兼容模式：勾选后强制 720P (H.264)，解决 VR 一体机黑屏问题。
+ * 2. 智能容错：1080P 失败自动降级。
+ * 3. 历史记录：本地保存最近 5 条。
+ * 4. UI 微调：优化了 Quest 按钮的可见性和交互反馈。
  */
 
 const REFERER = 'https://www.bilibili.com/';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
-// --- 错误码字典 ---
 const ERROR_MAP = {
     '-400': '请求错误', '-403': '访问权限不足', '-404': '视频不存在', 
     '-10403': '仅限港澳台地区', '62002': '视频不可见', '62004': '审核中'
@@ -35,13 +35,9 @@ async function signWbi(params) {
     return query + `&w_rid=${w_rid}`;
 }
 
-// --- 业务逻辑 ---
 async function extractBvid(text) {
-    // 1. 优先匹配 BV 号
     let match = text.match(/(BV[a-zA-Z0-9]{10})/);
     if (match) return match[1];
-
-    // 2. 匹配 b23.tv 短链 (即使混在中文里)
     const b23Match = text.match(/b23\.tv\/([a-zA-Z0-9]+)/);
     if (b23Match) {
         try {
@@ -50,11 +46,28 @@ async function extractBvid(text) {
             if (match) return match[1];
         } catch (e) {}
     }
-    // 3. 匹配完整 bilibili.com 链接
     const urlMatch = text.match(/video\/(BV[a-zA-Z0-9]{10})/);
     if (urlMatch) return urlMatch[1];
-
     throw new Error("无效的链接");
+}
+
+// 自动降级逻辑
+async function getPlayUrlWithFallback(bvid, cid, targetQn) {
+    const qualities = [targetQn, 64, 32].filter((v, i, a) => a.indexOf(v) === i && v <= targetQn);
+    let lastError = null;
+    for (const qn of qualities) {
+        try {
+            const signedQuery = await signWbi({ bvid, cid, qn: qn, fnval: 1 });
+            const pRes = await fetch(`https://api.bilibili.com/x/player/wbi/playurl?${signedQuery}`, {
+                headers: { 'User-Agent': UA, 'Referer': REFERER }
+            });
+            const pData = await pRes.json();
+            if (pData.code === 0 && pData.data.durl && pData.data.durl.length > 0) {
+                return { url: pData.data.durl[0].url, quality: pData.data.quality };
+            } else { lastError = pData.message || ERROR_MAP[pData.code]; }
+        } catch (e) { lastError = e.message; }
+    }
+    throw new Error(lastError || "解析失败");
 }
 
 async function resolveBili(bvid, qn, host) {
@@ -63,18 +76,12 @@ async function resolveBili(bvid, qn, host) {
     if (vData.code !== 0) throw new Error(ERROR_MAP[vData.code] || vData.message);
 
     const { cid, title, pic, owner } = vData.data;
-    const signedQuery = await signWbi({ bvid, cid, qn: qn || 80, fnval: 1 });
-    const pRes = await fetch(`https://api.bilibili.com/x/player/wbi/playurl?${signedQuery}`, {
-        headers: { 'User-Agent': UA, 'Referer': REFERER }
-    });
-    const pData = await pRes.json();
-    if (pData.code !== 0) throw new Error(ERROR_MAP[pData.code] || "解析失败");
+    const videoStream = await getPlayUrlWithFallback(bvid, cid, qn || 80);
 
-    const rawUrl = pData.data.durl[0].url;
-    const playableUrl = `${host}/proxy?url=${encodeURIComponent(rawUrl)}&name=${encodeURIComponent(title)}`;
+    const playableUrl = `${host}/proxy?url=${encodeURIComponent(videoStream.url)}&name=${encodeURIComponent(title)}`;
     const downloadUrl = `${playableUrl}&dl=1`;
 
-    return { title, pic, bvid, author: owner.name, playableUrl, downloadUrl };
+    return { title, pic, bvid, author: owner.name, playableUrl, downloadUrl, quality: videoStream.quality };
 }
 
 // --- UI 界面 ---
@@ -91,20 +98,26 @@ const UI = (host) => `
         .glass { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(20px); border: 1px solid rgba(255, 255, 255, 0.1); box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
         .bg-gradient-mesh { background: radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%), radial-gradient(at 50% 0%, hsla(225,39%,30%,1) 0, transparent 50%), radial-gradient(at 100% 0%, hsla(339,49%,30%,1) 0, transparent 50%); position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; }
         #bg-cover { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; opacity: 0; transition: opacity 1s ease; background-size: cover; background-position: center; filter: blur(30px) brightness(0.4); transform: scale(1.1); }
+        .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(100px); background: rgba(0,0,0,0.8); color: white; padding: 10px 20px; rounded: 10px; transition: transform 0.3s ease; border-radius: 50px; font-size: 14px; z-index: 100; border: 1px solid rgba(255,255,255,0.2); }
+        .toast.show { transform: translateX(-50%) translateY(0); }
     </style>
 </head>
-<body class="text-slate-100 min-h-screen flex items-center justify-center p-4">
+<body class="text-slate-100 min-h-screen flex flex-col items-center justify-center p-4">
     <div class="bg-gradient-mesh"></div>
     <div id="bg-cover"></div>
+
     <div class="w-full max-w-lg relative z-10">
         <div class="text-center mb-8 space-y-1">
             <h1 class="text-4xl font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-pink-500">BILI PARSER</h1>
             <p class="text-xs font-bold text-slate-500 tracking-[0.4em] uppercase">High Speed & Direct Link</p>
         </div>
-        <div class="glass rounded-3xl p-6 space-y-5 transition-all duration-300 hover:border-white/20">
+
+        <div class="glass rounded-3xl p-6 space-y-4 transition-all duration-300 hover:border-white/20">
+            <!-- 输入与按钮区域 -->
             <div class="space-y-3">
-                <input type="text" id="input" placeholder="在此粘贴视频链接..." 
-                    class="w-full bg-slate-900/60 border border-slate-700/50 rounded-xl px-4 py-4 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all placeholder-slate-500 text-center">
+                <input type="text" id="input" placeholder="粘贴视频链接 (支持混杂文本)..." 
+                    class="w-full bg-slate-900/60 border border-slate-700/50 rounded-xl px-4 py-4 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all text-center placeholder-slate-500">
+                
                 <div class="flex gap-2">
                     <select id="qn" class="bg-slate-900/60 border border-slate-700/50 rounded-xl px-3 py-3 text-xs outline-none text-slate-300 w-1/3 text-center appearance-none">
                         <option value="80">1080P 高画质</option>
@@ -114,13 +127,32 @@ const UI = (host) => `
                     <button onclick="doParse()" class="flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold py-3 rounded-xl transition-all shadow-lg shadow-blue-500/20 active:scale-95">立即解析</button>
                 </div>
             </div>
-            <div id="loader" class="hidden py-8 text-center"><div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div><p class="text-xs text-slate-400 mt-2 font-mono">PROCESSING...</p></div>
-            <div id="result" class="hidden space-y-5 pt-2 border-t border-white/5">
+
+            <!-- 优化后的 Quest 按钮布局 -->
+            <div class="flex justify-between items-center px-1 pt-1 opacity-90">
+                <span class="text-[10px] text-slate-500 font-bold tracking-widest opacity-50">OPTIONS</span>
+                <label class="flex items-center gap-2 cursor-pointer group select-none">
+                    <input type="checkbox" id="questMode" class="peer hidden">
+                    <div class="w-3.5 h-3.5 rounded border border-slate-500 peer-checked:bg-blue-500 peer-checked:border-blue-500 transition-all flex items-center justify-center">
+                        <svg class="w-2.5 h-2.5 text-white hidden peer-checked:block" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="4" d="M5 13l4 4L19 7"></path></svg>
+                    </div>
+                    <span class="text-xs text-slate-400 group-hover:text-slate-200 transition-colors peer-checked:text-blue-400 font-medium">Quest 兼容模式</span>
+                </label>
+            </div>
+
+            <!-- 加载动画 -->
+            <div id="loader" class="hidden py-8 text-center"><div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div></div>
+
+            <!-- 结果区域 -->
+            <div id="result" class="hidden space-y-5 pt-4 border-t border-white/5">
                 <div class="flex gap-4 items-start">
                     <img id="resPic" class="w-28 h-16 object-cover rounded-lg shadow-md bg-slate-800 shrink-0">
                     <div class="min-w-0 flex-1 space-y-1">
                         <h3 id="resTitle" class="text-sm font-bold leading-tight line-clamp-2 text-white/90"></h3>
-                        <div class="flex items-center gap-2"><span id="resAuthor" class="text-[10px] text-slate-400"></span><span class="text-[10px] bg-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded">MP4</span></div>
+                        <div class="flex items-center gap-2">
+                            <span id="resAuthor" class="text-[10px] text-slate-400"></span>
+                            <span id="resQuality" class="text-[10px] bg-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded">MP4</span>
+                        </div>
                     </div>
                 </div>
                 <div class="relative group">
@@ -128,32 +160,76 @@ const UI = (host) => `
                     <button onclick="copy('link')" id="copyBtn" class="absolute right-2 top-2 bg-slate-700/50 hover:bg-slate-600 text-xs px-3 py-1 rounded-lg transition-colors border border-white/5">复制</button>
                 </div>
                 <div class="grid grid-cols-2 gap-3">
-                    <a id="btnPreview" target="_blank" class="flex items-center justify-center gap-2 bg-slate-700/50 hover:bg-slate-700 border border-white/5 py-3 rounded-xl text-sm font-bold transition-all group cursor-pointer">
-                        <svg class="w-4 h-4 text-slate-300 group-hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>在线预览
-                    </a>
-                    <a id="btnDownload" href="#" class="flex items-center justify-center gap-2 bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-500 hover:to-rose-500 py-3 rounded-xl text-sm font-bold shadow-lg shadow-pink-500/20 transition-all active:scale-95 cursor-pointer">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>下载 MP4
-                    </a>
+                    <a id="btnPreview" target="_blank" class="flex items-center justify-center gap-2 bg-slate-700/50 hover:bg-slate-700 border border-white/5 py-3 rounded-xl text-sm font-bold transition-all group cursor-pointer">预览</a>
+                    <a id="btnDownload" href="#" class="flex items-center justify-center gap-2 bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-500 hover:to-rose-500 py-3 rounded-xl text-sm font-bold shadow-lg shadow-pink-500/20 transition-all active:scale-95 cursor-pointer">下载 MP4</a>
                 </div>
             </div>
         </div>
+
+        <div id="historyArea" class="hidden mt-6 w-full max-w-lg glass rounded-3xl p-5">
+            <h4 class="text-xs font-bold text-slate-500 uppercase mb-3 flex justify-between">
+                <span>最近解析</span>
+                <span onclick="clearHistory()" class="cursor-pointer hover:text-white">清除</span>
+            </h4>
+            <div id="historyList" class="space-y-2"></div>
+        </div>
     </div>
+
+    <div id="toast" class="toast">消息提示</div>
+
     <script>
-        function copy(id) { const el = document.getElementById(id); el.select(); document.execCommand('copy'); const btn = document.getElementById('copyBtn'); const original = btn.innerText; btn.innerText = 'OK'; btn.classList.add('text-green-400'); setTimeout(() => { btn.innerText = original; btn.classList.remove('text-green-400'); }, 1500); }
+        function showToast(msg) { const t = document.getElementById('toast'); t.innerText = msg; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 3000); }
+        function copy(id) { const el = document.getElementById(id); el.select(); document.execCommand('copy'); showToast('链接已复制到剪贴板'); }
+
+        function loadHistory() {
+            const h = JSON.parse(localStorage.getItem('bili_history') || '[]');
+            const list = document.getElementById('historyList'); const area = document.getElementById('historyArea');
+            list.innerHTML = '';
+            if (h.length === 0) { area.classList.add('hidden'); return; }
+            area.classList.remove('hidden');
+            h.forEach(item => {
+                const div = document.createElement('div');
+                div.className = 'flex items-center gap-3 p-2 hover:bg-white/5 rounded-lg cursor-pointer transition-colors';
+                div.onclick = () => { document.getElementById('input').value = item.url; doParse(); };
+                div.innerHTML = \`<div class="w-10 h-6 bg-slate-800 rounded bg-cover bg-center" style="background-image:url('\${item.pic}')"></div><div class="flex-1 min-w-0"><p class="text-xs truncate text-slate-300">\${item.title}</p></div>\`;
+                list.appendChild(div);
+            });
+        }
+        function saveHistory(data) {
+            let h = JSON.parse(localStorage.getItem('bili_history') || '[]'); h = h.filter(x => x.bvid !== data.bvid);
+            h.unshift({ bvid: data.bvid, title: data.title, pic: data.pic, url: "https://www.bilibili.com/video/" + data.bvid });
+            if (h.length > 5) h.pop(); localStorage.setItem('bili_history', JSON.stringify(h)); loadHistory();
+        }
+        function clearHistory() { localStorage.removeItem('bili_history'); loadHistory(); }
+        loadHistory();
+
         async function doParse() {
-            const inputVal = document.getElementById('input').value; const qn = document.getElementById('qn').value; if(!inputVal) return;
+            const inputVal = document.getElementById('input').value;
+            const isQuest = document.getElementById('questMode').checked;
+            const qn = isQuest ? 64 : document.getElementById('qn').value; // Quest模式强制64(720P)
+
+            if(!inputVal) { showToast('请先输入视频链接'); return; }
             document.getElementById('loader').classList.remove('hidden'); document.getElementById('result').classList.add('hidden'); document.getElementById('bg-cover').style.opacity = '0';
+
             try {
                 const params = new URLSearchParams({ text: inputVal, qn: qn });
                 const res = await fetch(\`/api/any?\${params.toString()}\`); const data = await res.json();
                 if(data.status === 'success') {
                     const pic = data.pic.replace('http:', 'https:');
                     document.getElementById('resPic').src = pic; document.getElementById('bg-cover').style.backgroundImage = \`url('\${pic}')\`; document.getElementById('bg-cover').style.opacity = '0.4';
-                    document.getElementById('resTitle').innerText = data.title; document.getElementById('resAuthor').innerText = '@' + data.author; document.getElementById('link').value = data.playableUrl;
+                    document.getElementById('resTitle').innerText = data.title; document.getElementById('resAuthor').innerText = '@' + data.author;
+                    
+                    const qnMap = { 80: '1080P', 64: '720P', 32: '480P', 16: '360P' };
+                    // 状态栏显示 Quest 标识
+                    const qualityText = isQuest ? 'Quest (720P)' : (qnMap[data.quality] || 'MP4');
+                    document.getElementById('resQuality').innerText = qualityText;
+                    
+                    document.getElementById('link').value = data.playableUrl;
                     document.getElementById('btnPreview').href = data.playableUrl; document.getElementById('btnDownload').href = data.downloadUrl;
+                    saveHistory(data);
                     document.getElementById('result').classList.remove('hidden');
-                } else { alert(data.message); }
-            } catch(e) { alert('请求失败'); } finally { document.getElementById('loader').classList.add('hidden'); }
+                } else { showToast(data.message); }
+            } catch(e) { showToast('网络请求失败'); } finally { document.getElementById('loader').classList.add('hidden'); }
         }
     </script>
 </body>
@@ -166,27 +242,20 @@ export default {
         const host = url.origin;
         const path = url.pathname;
 
-        // 1. 代理视频流
         if (path === '/proxy') {
             const target = url.searchParams.get('url');
             const name = url.searchParams.get('name');
             const isDownload = url.searchParams.get('dl') === '1';
-
             if (!target) return new Response('Missing URL', { status: 400 });
             try {
                 const targetUrl = new URL(target);
-                if (!targetUrl.hostname.includes('bilivideo') && !targetUrl.hostname.includes('hdslb') && !targetUrl.hostname.includes('akamaized')) {
-                    return new Response('Forbidden', { status: 403 });
-                }
+                if (!targetUrl.hostname.includes('bilivideo') && !targetUrl.hostname.includes('hdslb') && !targetUrl.hostname.includes('akamaized')) return new Response('Forbidden', { status: 403 });
             } catch(e) { return new Response('Invalid URL', { status: 400 }); }
-
             const newHeaders = new Headers({ 'Referer': REFERER, 'User-Agent': UA });
             if (request.headers.has("Range")) newHeaders.set("Range", request.headers.get("Range"));
-
             const response = await fetch(target, { headers: newHeaders });
             const responseHeaders = new Headers(response.headers);
             responseHeaders.set("Access-Control-Allow-Origin", "*");
-
             if (name) {
                 const safeName = name.replace(/["\r\n]/g, "");
                 const disposition = isDownload ? 'attachment' : 'inline';
@@ -195,58 +264,38 @@ export default {
             return new Response(response.body, { status: response.status, statusText: response.statusText, headers: responseHeaders });
         }
 
-        // 2. 首页
-        if (path === '/' || path === '') {
-            return new Response(UI(host), { headers: { 'Content-Type': 'text/html;charset=UTF-8' } });
-        }
+        if (path === '/' || path === '') return new Response(UI(host), { headers: { 'Content-Type': 'text/html;charset=UTF-8' } });
 
-        // 3. API 接口
         if (path === '/api/any') {
             const text = url.searchParams.get('text');
             const qn = url.searchParams.get('qn') || 80;
             if (!text) return new Response(JSON.stringify({ status: 'error' }), { status: 400 });
-
             const cache = caches.default;
             const cacheKey = new Request(url.toString(), request);
             let response = await cache.match(cacheKey);
-            
             if (!response) {
                 try {
                     const bvid = await extractBvid(text);
-                    const res = await resolveBili(bvid, qn, host);
+                    const res = await resolveBili(bvid, parseInt(qn), host);
                     response = new Response(JSON.stringify({ status: 'success', ...res }), {
                         headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'public, max-age=1200' }
                     });
                     ctx.waitUntil(cache.put(cacheKey, response.clone()));
-                } catch (e) {
-                    return new Response(JSON.stringify({ status: 'error', message: e.message }), { status: 500 });
-                }
+                } catch (e) { return new Response(JSON.stringify({ status: 'error', message: e.message }), { status: 500 }); }
             }
             return response;
         }
 
-        // 4. [新功能] 万能路径匹配 (Catch-All Route)
-        // 逻辑：如果路径不是系统路径，尝试解码并提取 B站链接
-        // 例子：/【Ether Strike.mp4-哔哩哔哩】 https://b23.tv/OoyY97Z
-        // 例子：/BV1xx411c7x
         if (path.length > 1) {
             try {
-                // 解码路径 (处理 %E3%80... 等编码)
                 const rawPath = decodeURIComponent(path.slice(1));
-                
-                // 尝试提取
                 const bvid = await extractBvid(rawPath);
-                
                 if (bvid) {
-                    // 解析并重定向到播放代理
                     const res = await resolveBili(bvid, 80, host);
                     return Response.redirect(res.playableUrl, 302);
                 }
-            } catch (e) {
-                // 提取失败则继续往下走 (返回 404)
-            }
+            } catch (e) {}
         }
-
         return new Response('Not Found', { status: 404 });
     }
 }
