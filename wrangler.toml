@@ -1,0 +1,6 @@
+name = "bili-resolver"
+main = "index.js"
+compatibility_date = "2026-01-24"
+
+[placement]
+mode = "smart"
