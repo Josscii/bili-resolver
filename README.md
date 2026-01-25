@@ -3,7 +3,7 @@
 > 专为 VRChat 优化的 Bilibili 视频播放兼容层与流媒体代理服务。
 > 修复 VRChat 播放器因 Referer 校验机制导致无法播放 B 站视频的问题。
 > 
-> ***本项目的核心目的是帮助用户利用 Cloudflare 资源，构建私有、稳定且数据安全的 VRChat 视频解析服务。***
+> ***本项目的核心目的是帮助用户利用 Cloudflare 资源，构建私有、稳定且数据安全的 VRChat 视频兼容服务。***
 
 ![VRChat Ready](https://img.shields.io/badge/VRChat-Ready-pink?logo=vrchat)
 ![Cloudflare Workers](https://img.shields.io/badge/Deployed%20on-Cloudflare%20Workers-orange?logo=cloudflare)
@@ -11,7 +11,7 @@
 
 **Bili-Resolver-Worker** 是一个运行在 Cloudflare Workers 上的轻量级工具。
 
-对于 **VRChat** 玩家而言，它是一个**协议适配器**。由于 Bilibili 的视频链接需要特定的 Referer 头才能访问，标准的 VRChat 播放器（Unity Video Player）通常会因为缺少该头部而报错（403 Forbidden）。本服务作为一个中间层，补全必要的请求头，实现视频流在 VRChat 内的正常加载。
+对于 **VRChat** 玩家而言，它是一个**协议适配器**。由于 Bilibili 的视频链接需要特定的 Referer 头才能访问，标准的 VRChat 播放器（Unity Video Player）通常会因为缺少该头部而报错（403 Forbidden）。本服务作为一个中间层，补全必要的请求头，实现视频流在 VR 环境下的正常加载。
 
 ## ⚠️ 网络连接重要提示 (必读)
 
@@ -22,6 +22,7 @@
 
 * **有域名：** 直接在 Cloudflare Worker 设置中绑定二级域名（如 `api.yourdomain.com`）。
 * **无域名：** 可以尝试使用免费域名服务（如 `pp.ua`、`eu.org`、`dpdns.org`等）。
+* **💡 购买提示：** 如果需要购买廉价域名（首年 $1 左右），可以参考 [TLD-List](https://zh-hans.tld-list.com/) 进行比价。
 
 如果你在国内仅使用加速器游玩 VRChat，**必须绑定自定义域名 (Custom Domain)** 才能正常解析和播放。
 
@@ -33,10 +34,10 @@
 - 🎮 **VRChat 深度适配**: 专为 USharpVideo, ProTV, iwaSyncVideo 等播放器优化，解决黑屏与加载失败问题。
 - 🕶️ **Quest 性能模式**: 提供 H.264 (720P) 兼容选项，完美解决 Quest 一体机解码兼容性问题。
 - 🛡️ **智能容错**: 1080P 请求失败时自动降级 (720P/480P)，优先保证播放连通性。
-- 💾 **本地历史记录**: 本地浏览器自动记录最近 5 次解析，方便快速重播。
 - 🔄 **Referer 协议修正**: 自动补全 VRChat 缺失的请求头，修复 403 Forbidden 错误。
 - ⚡ **万能链接识别**: 支持直接粘贴混杂文本（如 B 站分享文案），智能提取视频 ID。
 - 📥 **本地缓存**: 支持提取 MP4 直链进行本地预览或缓存，优化弱网环境下的 VR 体验。
+- 💾 **历史回溯**: 本地浏览器自动记录最近 5 次解析，方便快速重播。
 - 🚀 **零成本部署**: 单文件架构，基于 Cloudflare Workers 免费版即可运行。
 
 ## 🎮 VRChat 使用指南
@@ -72,11 +73,11 @@ https://你的自定义域名.com/【视频标题】 https://b23.tv/xxx
 2. **创建 Worker**:
    - 登录 [Cloudflare Dashboard](https://dash.cloudflare.com/)。
    - 在左侧菜单点击 **Workers & Pages** -> **Create Application**。
-   - 点击 **Connect to Git** (不要点 Create Worker)。
+   - 点击 **Continue with GitHub**。
    - 选择你刚才 Fork 的仓库。
    - 保持默认设置 (Settings 均无需修改)，点击 **Save and Deploy**。
 
-3. **绑定域名 (必做)**:
+3. **绑定域名 (中国用户必做)**:
    - 部署完成后，进入该 Worker 的详情页。
    - 点击顶部的 **Settings** (设置) -> **域和路由**。
    - 点击 **Add Custom Domain**，输入你的二级域名并保存。
@@ -87,7 +88,7 @@ https://你的自定义域名.com/【视频标题】 https://b23.tv/xxx
 
 1. **创建 Worker**:
    - 登录 [Cloudflare Dashboard](https://dash.cloudflare.com/)。
-   - 点击 **Workers & Pages** -> **Create Application** -> **Create Worker**。
+   - 点击 **Workers & Pages** -> **Create Application** -> **从 Hello World! 开始**。
    - 点击 **Deploy**。
 
 2. **粘贴代码**:
@@ -96,7 +97,7 @@ https://你的自定义域名.com/【视频标题】 https://b23.tv/xxx
    - 点击 **Deploy** 保存。
 
 3. **绑定域名**:
-   - 同样在 **Settings** -> **Triggers** 中添加自定义域名。
+   - 同样在 **Settings** -> **域和路由** 中添加自定义域名。
 
 ### 方法三：使用 Wrangler CLI (开发者)
 
@@ -151,6 +152,7 @@ A: 会。Cloudflare Workers 免费版每天有 100,000 次请求限制。视频�
 2. **服务条款**: **严禁** 将本项目用于搭建公开的大规模视频代理服务，这可能违反 Cloudflare 服务条款 (Non-HTML Content)。
 3. **版权声明**: 本项目不存储、不发布任何视频内容，仅做实时流量协议转换。请尊重版权，**严禁** 使用本项目进行非法分发。
 4. **责任豁免**: 作者不对使用本项目造成的任何账号封禁（Bilibili/Cloudflare）或法律后果负责。如果您收到滥用警告，请立即停止服务。
-```## 📄 License
+
+## 📄 License
 
 MIT License
