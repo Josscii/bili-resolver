@@ -1,9 +1,9 @@
 # 📺 Bilibili Resolver & Proxy Worker
 
-> 专为 VRChat 优化的 Bilibili 视频解析与流媒体代理服务。
-> 解决 VRChat 播放器无法播放 B 站视频的 Referer 防盗链问题。
+> 专为 VRChat 优化的 Bilibili 视频播放兼容层与流媒体代理服务。
+> 修复 VRChat 播放器因 Referer 校验机制导致无法播放 B 站视频的问题。
 > 
-> ***本项目的核心目的是帮助低成本用户利用 Cloudflare 免费资源，自建专属的解析服务，不再受制于第三方主流解析站的不稳定与广告干扰。***
+> ***本项目的核心目的是帮助用户利用 Cloudflare 资源，构建私有、稳定且数据安全的 VRChat 视频解析服务。***
 
 ![VRChat Ready](https://img.shields.io/badge/VRChat-Ready-pink?logo=vrchat)
 ![Cloudflare Workers](https://img.shields.io/badge/Deployed%20on-Cloudflare%20Workers-orange?logo=cloudflare)
@@ -11,7 +11,7 @@
 
 **Bili-Resolver-Worker** 是一个运行在 Cloudflare Workers 上的轻量级工具。
 
-对于 **VRChat** 玩家而言，它是一个**视频中转站**。由于 Bilibili 的视频链接通过 Referer 验证进行防盗链，普通的 VRChat 播放器直接输入 B 站链接通常会加载失败或报错（403 Forbidden）。本服务作为一个中间层，自动处理所有鉴权请求头，并将视频流无缝转发给 VRChat 播放器。
+对于 **VRChat** 玩家而言，它是一个**协议适配器**。由于 Bilibili 的视频链接需要特定的 Referer 头才能访问，标准的 VRChat 播放器（Unity Video Player）通常会因为缺少该头部而报错（403 Forbidden）。本服务作为一个中间层，补全必要的请求头，实现视频流在 VRChat 内的正常加载。
 
 ## ⚠️ 网络连接重要提示 (必读)
 
@@ -30,13 +30,14 @@
 
 ## ✨ 核心特性
 
-- 🎮 **VRChat 完美兼容**: 专为 USharpVideo, ProTV, iwaSyncVideo 等 VRChat 播放器设计。
-- 🔄 **Git 自动集成**: 支持 Fork 仓库后自动部署，源码更新一键同步。
-- 🔓 **自动绕过防盗链**: 服务端自动伪造 `Referer` 和 `User-Agent`，解决视频无法加载的问题。
-- ⚡ **一键直连**: 支持直接粘贴 `BV号` 或 `b23.tv` 短链，智能识别并解析。
-- 📱 **多画质支持**: 默认为 1080P 高清画质，支持通过参数降级。
-- 📥 **强制下载**: 提供 Web 界面，支持一键下载命名的 MP4 文件。
-- 🚀 **零成本部署**: 单文件逻辑，基于 Cloudflare Workers 免费版即可稳定运行。
+- 🎮 **VRChat 深度适配**: 专为 USharpVideo, ProTV, iwaSyncVideo 等播放器优化，解决黑屏与加载失败问题。
+- 🕶️ **Quest 性能模式**: 提供 H.264 (720P) 兼容选项，完美解决 Quest 一体机解码兼容性问题。
+- 🛡️ **智能容错**: 1080P 请求失败时自动降级 (720P/480P)，优先保证播放连通性。
+- 💾 **本地历史记录**: 本地浏览器自动记录最近 5 次解析，方便快速重播。
+- 🔄 **Referer 协议修正**: 自动补全 VRChat 缺失的请求头，修复 403 Forbidden 错误。
+- ⚡ **万能链接识别**: 支持直接粘贴混杂文本（如 B 站分享文案），智能提取视频 ID。
+- 📥 **本地缓存**: 支持提取 MP4 直链进行本地预览或缓存，优化弱网环境下的 VR 体验。
+- 🚀 **零成本部署**: 单文件架构，基于 Cloudflare Workers 免费版即可运行。
 
 ## 🎮 VRChat 使用指南
 
@@ -77,7 +78,7 @@ https://你的自定义域名.com/【视频标题】 https://b23.tv/xxx
 
 3. **绑定域名 (必做)**:
    - 部署完成后，进入该 Worker 的详情页。
-   - 点击顶部的 **Settings** (设置) -> **Triggers** (触发器)。
+   - 点击顶部的 **Settings** (设置) -> **域和路由**。
    - 点击 **Add Custom Domain**，输入你的二级域名并保存。
 
 ### 方法二：网页在线部署 (简单，无需 Git)
@@ -123,12 +124,12 @@ https://你的自定义域名.com/【视频标题】 https://b23.tv/xxx
 ### 2. 网页解析器 (Web UI)
 在浏览器中直接访问域名，提供一个现代化的图形界面（Glassmorphism 风格）。
 - **URL**: `/`
-- **功能**: 支持解析预览、复制直链、一键下载 MP4。
+- **功能**: 支持解析预览、复制直链、本地缓存 MP4。
 
 ### 3. 万能流代理 (Proxy)
 Worker 的核心代理端点，用于中转 Bilibili 的流量。
 - **URL**: `/proxy?url=<ENCODED_URL>&dl=<0|1>`
-- **参数**: `dl=1` 可强制触发浏览器下载。
+- **参数**: `dl=1` 可触发浏览器附件保存行为（用于本地缓存）。
 
 ## ❓ 常见问题 (FAQ)
 
@@ -144,8 +145,12 @@ A: 请使用我们提供的 Web UI 界面点击下载，或者手动在链接后
 **Q: 会消耗 Cloudflare 额度吗？**
 A: 会。Cloudflare Workers 免费版每天有 100,000 次请求限制。视频流代理会消耗 Worker 的 CPU 时间，建议仅供个人或小规模好友使用。
 
-## ⚠️ 免责声明
+## ⚠️ 免责声明 (Disclaimer)
 
-1. 本项目仅供用于 VRChat 玩家技术交流和个人娱乐，**严禁用于商业用途**。
-2. 脚本不存储任何视频内容，仅做实时解析与流量转发。
-3. 请勿在公共大流量实例中滥用，以免被 Cloudflare 封禁账号。
+1. **使用目的**: 本项目仅供开发者技术学习及 **VRChat 个人房主** 测试组件兼容性使用。
+2. **服务条款**: **严禁** 将本项目用于搭建公开的大规模视频代理服务，这可能违反 Cloudflare 服务条款 (Non-HTML Content)。
+3. **版权声明**: 本项目不存储、不发布任何视频内容，仅做实时流量协议转换。请尊重版权，**严禁** 使用本项目进行非法分发。
+4. **责任豁免**: 作者不对使用本项目造成的任何账号封禁（Bilibili/Cloudflare）或法律后果负责。如果您收到滥用警告，请立即停止服务。
+```## 📄 License
+
+MIT License
