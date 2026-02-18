@@ -1,6 +1,6 @@
 /**
  * Bilibili Resolver & Proxy Worker (v2.7 Refined)
- * 
+ *
  * 版本特性：
  * 1. Quest 兼容模式：勾选后强制 720P (H.264)，解决 VR 一体机黑屏问题。
  * 2. 智能容错：1080P 失败自动降级。
@@ -8,80 +8,151 @@
  * 4. UI 微调：优化了 Quest 按钮的可见性和交互反馈。
  */
 
-const REFERER = 'https://www.bilibili.com/';
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+const REFERER = "https://www.bilibili.com/";
+const UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
 const ERROR_MAP = {
-    '-400': '请求错误', '-403': '访问权限不足', '-404': '视频不存在', 
-    '-10403': '仅限港澳台地区', '62002': '视频不可见', '62004': '审核中'
+  "-400": "请求错误",
+  "-403": "访问权限不足",
+  "-404": "视频不存在",
+  "-10403": "仅限港澳台地区",
+  62002: "视频不可见",
+  62004: "审核中",
 };
 
 // --- WBI 签名算法 ---
-const mixinKeyEncTab = [46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49, 33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13, 37, 48, 7, 16, 24, 55, 40, 61, 26, 17, 0, 1, 60, 51, 30, 4, 22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11, 36, 20, 34, 44, 52];
-const getMixinKey = (orig) => mixinKeyEncTab.map(n => orig[n]).join('').slice(0, 32);
+const mixinKeyEncTab = [
+  46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49,
+  33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13, 37, 48, 7, 16, 24, 55, 40, 61,
+  26, 17, 0, 1, 60, 51, 30, 4, 22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11, 36,
+  20, 34, 44, 52,
+];
+const getMixinKey = (orig) =>
+  mixinKeyEncTab
+    .map((n) => orig[n])
+    .join("")
+    .slice(0, 32);
 async function md5(text) {
-    const msgUint8 = new TextEncoder().encode(text);
-    const hashBuffer = await crypto.subtle.digest('MD5', msgUint8);
-    return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+  const msgUint8 = new TextEncoder().encode(text);
+  const hashBuffer = await crypto.subtle.digest("MD5", msgUint8);
+  return Array.from(new Uint8Array(hashBuffer))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 async function signWbi(params) {
-    const res = await fetch("https://api.bilibili.com/x/web-interface/nav", { headers: { "User-Agent": UA } });
-    const json = await res.json();
-    const { img_url, sub_url } = json.data.wbi_img;
-    const mixin_key = getMixinKey(img_url.split('/').pop().split('.')[0] + sub_url.split('/').pop().split('.')[0]);
-    const curr_params = { ...params, wts: Math.floor(Date.now() / 1000) };
-    const query = Object.keys(curr_params).sort().map(k => `${k}=${encodeURIComponent(curr_params[k])}`).join('&');
-    const w_rid = await md5(query + mixin_key);
-    return query + `&w_rid=${w_rid}`;
+  const res = await fetch("https://api.bilibili.com/x/web-interface/nav", {
+    headers: { "User-Agent": UA },
+  });
+  const json = await res.json();
+  const { img_url, sub_url } = json.data.wbi_img;
+  const mixin_key = getMixinKey(
+    img_url.split("/").pop().split(".")[0] +
+      sub_url.split("/").pop().split(".")[0],
+  );
+  const curr_params = { ...params, wts: Math.floor(Date.now() / 1000) };
+  const query = Object.keys(curr_params)
+    .sort()
+    .map((k) => `${k}=${encodeURIComponent(curr_params[k])}`)
+    .join("&");
+  const w_rid = await md5(query + mixin_key);
+  return query + `&w_rid=${w_rid}`;
 }
 
-async function extractBvid(text) {
-    let match = text.match(/(BV[a-zA-Z0-9]{10})/);
-    if (match) return match[1];
-    const b23Match = text.match(/b23\.tv\/([a-zA-Z0-9]+)/);
-    if (b23Match) {
-        try {
-            const res = await fetch(`https://b23.tv/${b23Match[1]}`, { method: 'HEAD', redirect: 'follow', headers: { 'User-Agent': UA } });
-            match = res.url.match(/(BV[a-zA-Z0-9]{10})/);
-            if (match) return match[1];
-        } catch (e) {}
+async function extractBvidAndP(text) {
+  let url = text.match(/https?:\/\/[^\s]+/g)?.[0];
+
+  if (!url) throw new Error("无效的链接");
+
+  const b23Match = url.match(/b23\.tv\/([a-zA-Z0-9]+)/);
+  if (b23Match) {
+    try {
+      const res = await fetch(url, {
+        method: "HEAD",
+        redirect: "follow",
+        headers: { "User-Agent": UA },
+      });
+      url = res.url;
+    } catch (e) {
+      throw new Error("无法解析 b23.tv 链接");
     }
-    const urlMatch = text.match(/video\/(BV[a-zA-Z0-9]{10})/);
-    if (urlMatch) return urlMatch[1];
-    throw new Error("无效的链接");
+  }
+
+  const urlObj = new URL(url);
+  const bvidMatch = urlObj.pathname.match(/(BV[a-zA-Z0-9]{10})/);
+  const pMatch =
+    urlObj.searchParams.get("p") || urlObj.pathname.match(/\/p(\d+)/);
+  if (bvidMatch) {
+    return {
+      bvid: bvidMatch[1],
+      p: pMatch ? parseInt(pMatch[1] || pMatch) : 1,
+    };
+  }
+
+  throw new Error("无效的链接");
 }
 
 // 自动降级逻辑
 async function getPlayUrlWithFallback(bvid, cid, targetQn) {
-    const qualities = [targetQn, 64, 32].filter((v, i, a) => a.indexOf(v) === i && v <= targetQn);
-    let lastError = null;
-    for (const qn of qualities) {
-        try {
-            const signedQuery = await signWbi({ bvid, cid, qn: qn, fnval: 1 });
-            const pRes = await fetch(`https://api.bilibili.com/x/player/wbi/playurl?${signedQuery}`, {
-                headers: { 'User-Agent': UA, 'Referer': REFERER }
-            });
-            const pData = await pRes.json();
-            if (pData.code === 0 && pData.data.durl && pData.data.durl.length > 0) {
-                return { url: pData.data.durl[0].url, quality: pData.data.quality };
-            } else { lastError = pData.message || ERROR_MAP[pData.code]; }
-        } catch (e) { lastError = e.message; }
+  const qualities = [targetQn, 64, 32].filter(
+    (v, i, a) => a.indexOf(v) === i && v <= targetQn,
+  );
+  let lastError = null;
+  for (const qn of qualities) {
+    try {
+      const signedQuery = await signWbi({
+        bvid,
+        cid,
+        qn: qn,
+        fnval: 1,
+        platform: "html5",
+      });
+      const pRes = await fetch(
+        `https://api.bilibili.com/x/player/wbi/playurl?${signedQuery}`,
+        {
+          headers: { "User-Agent": UA, Referer: REFERER },
+        },
+      );
+      const pData = await pRes.json();
+      if (pData.code === 0 && pData.data.durl && pData.data.durl.length > 0) {
+        return { url: pData.data.durl[0].url, quality: pData.data.quality };
+      } else {
+        lastError = pData.message || ERROR_MAP[pData.code];
+      }
+    } catch (e) {
+      lastError = e.message;
     }
-    throw new Error(lastError || "解析失败");
+  }
+  throw new Error(lastError || "解析失败");
 }
 
-async function resolveBili(bvid, qn, host) {
-    const vRes = await fetch(`https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`, { headers: { 'User-Agent': UA } });
-    const vData = await vRes.json();
-    if (vData.code !== 0) throw new Error(ERROR_MAP[vData.code] || vData.message);
+async function resolveBili(bvid, p, qn) {
+  const vRes = await fetch(
+    `https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`,
+    { headers: { "User-Agent": UA } },
+  );
+  const vData = await vRes.json();
+  if (vData.code !== 0) throw new Error(ERROR_MAP[vData.code] || vData.message);
 
-    const { cid, title, pic, owner } = vData.data;
-    const videoStream = await getPlayUrlWithFallback(bvid, cid, qn || 80);
+  let { cid, title, pic, owner, pages } = vData.data;
 
-    const playableUrl = `${host}/proxy?url=${encodeURIComponent(videoStream.url)}&name=${encodeURIComponent(title)}`;
-    const downloadUrl = `${playableUrl}&dl=1`;
+  if (p && pages && pages.length > 0) {
+    const page = pages.find((pg) => pg.page === p) || pages[0];
+    cid = page.cid;
+    title += ` - P${page.page} ${page.part}`;
+  }
 
-    return { title, pic, bvid, author: owner.name, playableUrl, downloadUrl, quality: videoStream.quality };
+  const videoStream = await getPlayUrlWithFallback(bvid, cid, qn || 80);
+
+  return {
+    title,
+    pic,
+    bvid,
+    p,
+    author: owner.name,
+    url: videoStream.url,
+    quality: videoStream.quality,
+  };
 }
 
 // --- UI 界面 ---
@@ -237,65 +308,98 @@ const UI = (host) => `
 `;
 
 export default {
-    async fetch(request, env, ctx) {
-        const url = new URL(request.url);
-        const host = url.origin;
-        const path = url.pathname;
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+    const host = url.origin;
+    const path = url.pathname;
 
-        if (path === '/proxy') {
-            const target = url.searchParams.get('url');
-            const name = url.searchParams.get('name');
-            const isDownload = url.searchParams.get('dl') === '1';
-            if (!target) return new Response('Missing URL', { status: 400 });
-            try {
-                const targetUrl = new URL(target);
-                if (!targetUrl.hostname.includes('bilivideo') && !targetUrl.hostname.includes('hdslb') && !targetUrl.hostname.includes('akamaized')) return new Response('Forbidden', { status: 403 });
-            } catch(e) { return new Response('Invalid URL', { status: 400 }); }
-            const newHeaders = new Headers({ 'Referer': REFERER, 'User-Agent': UA });
-            if (request.headers.has("Range")) newHeaders.set("Range", request.headers.get("Range"));
-            const response = await fetch(target, { headers: newHeaders });
-            const responseHeaders = new Headers(response.headers);
-            responseHeaders.set("Access-Control-Allow-Origin", "*");
-            if (name) {
-                const safeName = name.replace(/["\r\n]/g, "");
-                const disposition = isDownload ? 'attachment' : 'inline';
-                responseHeaders.set("Content-Disposition", `${disposition}; filename="${encodeURIComponent(safeName)}.mp4"`);
-            }
-            return new Response(response.body, { status: response.status, statusText: response.statusText, headers: responseHeaders });
-        }
-
-        if (path === '/' || path === '') return new Response(UI(host), { headers: { 'Content-Type': 'text/html;charset=UTF-8' } });
-
-        if (path === '/api/any') {
-            const text = url.searchParams.get('text');
-            const qn = url.searchParams.get('qn') || 80;
-            if (!text) return new Response(JSON.stringify({ status: 'error' }), { status: 400 });
-            const cache = caches.default;
-            const cacheKey = new Request(url.toString(), request);
-            let response = await cache.match(cacheKey);
-            if (!response) {
-                try {
-                    const bvid = await extractBvid(text);
-                    const res = await resolveBili(bvid, parseInt(qn), host);
-                    response = new Response(JSON.stringify({ status: 'success', ...res }), {
-                        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'public, max-age=1200' }
-                    });
-                    ctx.waitUntil(cache.put(cacheKey, response.clone()));
-                } catch (e) { return new Response(JSON.stringify({ status: 'error', message: e.message }), { status: 500 }); }
-            }
-            return response;
-        }
-
-        if (path.length > 1) {
-            try {
-                const rawPath = decodeURIComponent(path.slice(1));
-                const bvid = await extractBvid(rawPath);
-                if (bvid) {
-                    const res = await resolveBili(bvid, 80, host);
-                    return Response.redirect(res.playableUrl, 302);
-                }
-            } catch (e) {}
-        }
-        return new Response('Not Found', { status: 404 });
+    if (path === "/proxy") {
+      const target = url.searchParams.get("url");
+      const name = url.searchParams.get("name");
+      const isDownload = url.searchParams.get("dl") === "1";
+      if (!target) return new Response("Missing URL", { status: 400 });
+      try {
+        const targetUrl = new URL(target);
+        if (
+          !targetUrl.hostname.includes("bilivideo") &&
+          !targetUrl.hostname.includes("hdslb") &&
+          !targetUrl.hostname.includes("akamaized")
+        )
+          return new Response("Forbidden", { status: 403 });
+      } catch (e) {
+        return new Response("Invalid URL", { status: 400 });
+      }
+      const newHeaders = new Headers({ Referer: REFERER, "User-Agent": UA });
+      if (request.headers.has("Range"))
+        newHeaders.set("Range", request.headers.get("Range"));
+      const response = await fetch(target, { headers: newHeaders });
+      const responseHeaders = new Headers(response.headers);
+      responseHeaders.set("Access-Control-Allow-Origin", "*");
+      if (name) {
+        const safeName = name.replace(/["\r\n]/g, "");
+        const disposition = isDownload ? "attachment" : "inline";
+        responseHeaders.set(
+          "Content-Disposition",
+          `${disposition}; filename="${encodeURIComponent(safeName)}.mp4"`,
+        );
+      }
+      return new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: responseHeaders,
+      });
     }
-}
+
+    if (path === "/" || path === "")
+      return new Response(UI(host), {
+        headers: { "Content-Type": "text/html;charset=UTF-8" },
+      });
+
+    if (path === "/api/any") {
+      const text = url.searchParams.get("text");
+      const qn = url.searchParams.get("qn") || 64;
+      if (!text)
+        return new Response(JSON.stringify({ status: "error" }), {
+          status: 400,
+        });
+      const cache = caches.default;
+      const cacheKey = new Request(url.toString(), request);
+      let response = await cache.match(cacheKey);
+      if (!response) {
+        try {
+          const { bvid, p } = await extractBvidAndP(text);
+          const res = await resolveBili(bvid, p, parseInt(qn));
+          response = new Response(
+            JSON.stringify({ status: "success", ...res }),
+            {
+              headers: {
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Origin": "*",
+                "Cache-Control": "public, max-age=1200",
+              },
+            },
+          );
+          ctx.waitUntil(cache.put(cacheKey, response.clone()));
+        } catch (e) {
+          return new Response(
+            JSON.stringify({ status: "error", message: e.message }),
+            { status: 500 },
+          );
+        }
+      }
+      return response;
+    }
+
+    if (path.length > 1) {
+      try {
+        const rawPath = decodeURIComponent(path.slice(1));
+        const bvid = await extractBvid(rawPath);
+        if (bvid) {
+          const res = await resolveBili(bvid, 80, host);
+          return Response.redirect(res.playableUrl, 302);
+        }
+      } catch (e) {}
+    }
+    return new Response("Not Found", { status: 404 });
+  },
+};
