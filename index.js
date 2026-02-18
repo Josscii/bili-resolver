@@ -103,7 +103,7 @@ async function getPlayUrlWithFallback(bvid, cid, targetQn) {
       const signedQuery = await signWbi({
         bvid,
         cid,
-        qn: qn,
+        qn,
         fnval: 1,
         platform: "html5",
       });
@@ -139,7 +139,7 @@ async function resolveBili(bvid, p, qn) {
   if (p && pages && pages.length > 0) {
     const page = pages.find((pg) => pg.page === p) || pages[0];
     cid = page.cid;
-    title += ` - P${page.page} ${page.part}`;
+    title = page.part;
   }
 
   const videoStream = await getPlayUrlWithFallback(bvid, cid, qn || 80);
