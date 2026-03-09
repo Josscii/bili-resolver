@@ -9,12 +9,32 @@ npm install
 npm run dev
 ```
 
-默认监听 `http://127.0.0.1:8787`。
+默认监听 `http://127.0.0.1:3000`。
 
 生产启动：
 
 ```bash
 npm start
+```
+
+## Dokploy 部署
+
+仓库已经包含自动部署 workflow：`.github/workflows/dokploy-deploy.yml`。
+
+流程对应文章里的做法：
+
+- push 到 `codex/express-api-rewrite`
+- GitHub Actions 构建并推送镜像到 `ghcr.io`
+- 调用 `DOKPLOY_WEBHOOK` 触发 Dokploy 重部署
+
+你需要在 GitHub 仓库 Secrets 里新增：
+
+- `DOKPLOY_WEBHOOK`: Dokploy 项目的 Deploy Webhook URL
+
+Dokploy 里镜像地址建议填写：
+
+```text
+ghcr.io/<你的 GitHub 用户名或组织名（小写）>/<你的仓库名（小写）>:codex-express-api-rewrite
 ```
 
 ## 接口
@@ -29,7 +49,7 @@ npm start
 示例：
 
 ```bash
-curl "http://127.0.0.1:8787/api/any?text=https://www.bilibili.com/video/BV1xx411c7mD&qn=64"
+curl "http://127.0.0.1:3000/api/any?text=https://www.bilibili.com/video/BV1xx411c7mD&qn=64"
 ```
 
 成功返回：

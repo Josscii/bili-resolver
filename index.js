@@ -5,7 +5,7 @@ const REFERER = "https://www.bilibili.com/";
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 const CACHE_TTL_MS = 20 * 60 * 1000;
-const PORT = Number.parseInt(process.env.PORT ?? "8787", 10);
+const PORT = Number.parseInt(process.env.PORT ?? "3000", 10);
 const HOST = process.env.HOST ?? "127.0.0.1";
 
 const ERROR_MAP = {
