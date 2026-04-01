@@ -116,9 +116,19 @@ async function extractBvidAndP(text) {
 
   if (!bvidMatch) throw new Error("无效的链接");
 
+  let p = 1;
+  if (pMatch) {
+    if (typeof pMatch === "string") {
+      p = Number.parseInt(pMatch, 10);
+    } else if (Array.isArray(pMatch)) {
+      const captured = pMatch[1] ?? pMatch[0];
+      p = Number.parseInt(captured, 10);
+    }
+  }
+
   return {
     bvid: bvidMatch[1],
-    p: pMatch ? Number.parseInt(pMatch[1] || pMatch, 10) : 1,
+    p,
   };
 }
 
