@@ -92,7 +92,7 @@ async function signWbi(params) {
   return `${query}&w_rid=${md5(query + mixinKey)}`;
 }
 
-async function extractBvidAndP(text) {
+async function extractBvidAndP(text, fallbackPage) {
   let url = text.match(/https?:\/\/[^\s]+/g)?.[0];
   if (!url) throw new Error("无效的链接");
 
@@ -124,6 +124,12 @@ async function extractBvidAndP(text) {
       const captured = pMatch[1] ?? pMatch[0];
       p = Number.parseInt(captured, 10);
     }
+  } else if (fallbackPage) {
+    p = Number.parseInt(String(fallbackPage), 10);
+  }
+
+  if (!Number.isFinite(p) || p <= 0) {
+    p = 1;
   }
 
   return {
@@ -223,6 +229,7 @@ app.get("/api/any", async (req, res) => {
   }
 
   const qn = normalizeQn(getFirstQueryValue(req.query.qn));
+  const fallbackPage = getFirstQueryValue(req.query.p);
   const cacheKey = `${qn}:${text}`;
   const cachedPayload = getCachedPayload(cacheKey);
   if (cachedPayload) {
@@ -230,7 +237,7 @@ app.get("/api/any", async (req, res) => {
   }
 
   try {
-    const { bvid, p } = await extractBvidAndP(text);
+    const { bvid, p } = await extractBvidAndP(text, fallbackPage);
     const payload = {
       status: "success",
       ...(await resolveBili(bvid, p, qn)),
