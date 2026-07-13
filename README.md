@@ -1,6 +1,6 @@
 # Bilibili Resolver API
 
-一个纯 Node.js + Express 的 B 站解析服务，只保留 `/api/any` 这一条接口。
+一个纯 Node.js + Express 的 B 站解析服务，提供视频分辨率和音频码率列表。
 
 ## 运行
 
@@ -39,11 +39,11 @@ ghcr.io/<你的 GitHub 用户名或组织名（小写）>/<你的仓库名（小
 
 ## 接口
 
-### `GET /api/any`
+### `GET /api/any` 或 `GET /v2`
 
 查询参数：
 
-- `text`: B 站视频链接，支持普通链接和 `b23.tv` 短链
+- `text` 或 `url`: B 站视频链接，支持普通链接和 `b23.tv` 短链
 - `qn`: 目标画质，可选，默认 `64`
 
 示例：
@@ -63,11 +63,28 @@ curl "http://127.0.0.1:3000/api/any?text=https://www.bilibili.com/video/BV1xx411
   "p": 1,
   "author": "示例作者",
   "url": "https://upos-sz-mirror...bilivideo.com/...",
-  "quality": 64
+  "quality": 64,
+  "videos": [
+    {
+      "url": "https://...bilivideo.com/...",
+      "height": 720,
+      "quality": 64,
+      "filesize": null
+    }
+  ],
+  "audios": [
+    {
+      "url": "https://...bilivideo.com/...",
+      "bitrate": 132,
+      "quality": 30232,
+      "filesize": null
+    }
+  ]
 }
 ```
 
 ## 说明
 
 - 服务会在内存中缓存 20 分钟，减少重复请求 B 站接口。
+- `url` 和 `quality` 为兼容旧客户端保留；新客户端应使用 `videos` 和 `audios`。
 - 其余路径都会返回 `404` JSON。

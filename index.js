@@ -182,7 +182,86 @@ async function getPlayUrlWithFallback(bvid, cid, targetQn) {
   throw new Error(lastError || "解析失败");
 }
 
-async function resolveBili(bvid, p, qn) {
+function getStreamUrl(stream) {
+  return stream.baseUrl ?? stream.base_url ?? null;
+}
+
+function getStreamFileSize(stream) {
+  const size = Number.parseInt(String(stream.size ?? ""), 10);
+  return Number.isFinite(size) && size > 0 ? size : null;
+}
+
+function uniqueBy(items, key) {
+  const seen = new Set();
+  return items.filter((item) => {
+    const value = key(item);
+    if (seen.has(value)) return false;
+    seen.add(value);
+    return true;
+  });
+}
+
+async function getDashStreams(bvid, cid) {
+  const signedQuery = await signWbi({
+    bvid,
+    cid,
+    qn: 127,
+    fnval: 4048,
+    fnver: 0,
+    fourk: 1,
+  });
+  const res = await fetch(
+    `https://api.bilibili.com/x/player/wbi/playurl?${signedQuery}`,
+    {
+      headers: { "User-Agent": UA, Referer: REFERER },
+    },
+  );
+  if (!res.ok) throw new Error(`DASH 播放地址请求失败 (${res.status})`);
+
+  const data = await res.json();
+  if (data.code !== 0 || !data.data?.dash) {
+    throw new Error(data.message || ERROR_MAP[data.code] || "DASH 解析失败");
+  }
+
+  const rawVideos = data.data.dash.video ?? [];
+  const h264Videos = rawVideos.filter(
+    (stream) => stream.codecid === 7 || /^avc/i.test(stream.codecs ?? ""),
+  );
+  const compatibleVideos = h264Videos.length > 0 ? h264Videos : rawVideos;
+  const videos = uniqueBy(
+    compatibleVideos
+      .filter((stream) => getStreamUrl(stream) && stream.height > 0)
+      .sort(
+        (lhs, rhs) =>
+          rhs.height - lhs.height ||
+          (rhs.bandwidth ?? 0) - (lhs.bandwidth ?? 0),
+      )
+      .map((stream) => ({
+        url: getStreamUrl(stream),
+        height: stream.height,
+        quality: stream.id,
+        filesize: getStreamFileSize(stream),
+      })),
+    (stream) => stream.height,
+  );
+
+  const audios = uniqueBy(
+    (data.data.dash.audio ?? [])
+      .filter((stream) => getStreamUrl(stream) && stream.bandwidth > 0)
+      .sort((lhs, rhs) => rhs.bandwidth - lhs.bandwidth)
+      .map((stream) => ({
+        url: getStreamUrl(stream),
+        bitrate: Math.max(Math.round(stream.bandwidth / 1000), 1),
+        quality: stream.id,
+        filesize: getStreamFileSize(stream),
+      })),
+    (stream) => stream.bitrate,
+  );
+
+  return { videos, audios };
+}
+
+export async function resolveBili(bvid, p, qn) {
   const res = await fetch(
     `https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`,
     {
@@ -196,35 +275,41 @@ async function resolveBili(bvid, p, qn) {
     throw new Error(ERROR_MAP[data.code] || data.message || "解析失败");
   }
 
-  let { cid, title, pic, owner, pages } = data.data;
+  let { cid, title, pic, owner, pages, desc } = data.data;
   if (p && pages?.length > 0) {
     const page = pages.find((item) => item.page === p) || pages[0];
     cid = page.cid;
     title = page.part;
   }
 
-  const videoStream = await getPlayUrlWithFallback(bvid, cid, qn);
+  const [videoStream, dashStreams] = await Promise.all([
+    getPlayUrlWithFallback(bvid, cid, qn),
+    getDashStreams(bvid, cid).catch(() => ({ videos: [], audios: [] })),
+  ]);
 
   return {
     title,
+    description: desc ?? "",
     pic,
     bvid,
     p,
     author: owner?.name ?? "",
     url: videoStream.url,
     quality: videoStream.quality,
+    videos: dashStreams.videos,
+    audios: dashStreams.audios,
   };
 }
 
-app.get("/api/any", async (req, res) => {
+app.get(["/api/any", "/v2"], async (req, res) => {
   res.set("Access-Control-Allow-Origin", "*");
   res.set("Cache-Control", "public, max-age=1200");
 
-  const text = getFirstQueryValue(req.query.text);
+  const text = getFirstQueryValue(req.query.text ?? req.query.url);
   if (!text) {
     return res.status(400).json({
       status: "error",
-      message: "缺少 text 参数",
+      message: "缺少 text 或 url 参数",
     });
   }
 
