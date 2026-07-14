@@ -315,14 +315,15 @@ app.get(["/api/any", "/v2"], async (req, res) => {
 
   const qn = normalizeQn(getFirstQueryValue(req.query.qn));
   const fallbackPage = getFirstQueryValue(req.query.p);
-  const cacheKey = `${qn}:${text}`;
-  const cachedPayload = getCachedPayload(cacheKey);
-  if (cachedPayload) {
-    return res.json(cachedPayload);
-  }
 
   try {
     const { bvid, p } = await extractBvidAndP(text, fallbackPage);
+    const cacheKey = `${bvid}:${p}:${qn}`;
+    const cachedPayload = getCachedPayload(cacheKey);
+    if (cachedPayload) {
+      return res.json(cachedPayload);
+    }
+
     const payload = {
       status: "success",
       ...(await resolveBili(bvid, p, qn)),
