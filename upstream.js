@@ -11,7 +11,7 @@ export function createSelfHostedResolver(origin, token) {
       if (quality) url.searchParams.set("qn", quality);
       const response = await fetch(url, {
         headers: { Accept: "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        redirect: "error",
+        redirect: "manual",
         signal: AbortSignal.timeout(25_000),
       });
       if (!response.ok) throw new Error(`自部署解析服务请求失败 (${response.status})`);

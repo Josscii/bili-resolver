@@ -4,7 +4,15 @@
   "main": "worker.js",
   "account_id": "60168887b90fbd0f1ee2f80f56b8730a",
   "compatibility_date": "2025-09-23",
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
   "workers_dev": true,
-  "observability": { "enabled": true }
+  "observability": {
+    "enabled": true
+  },
+  "vars": {
+    "BILI_PROVIDER": "selfhost",
+    "BILI_UPSTREAM_URL": "https://parse.aistenapp.top/v2"
+  }
 }

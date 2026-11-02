@@ -10,7 +10,7 @@ test("self-hosted mode never calls TikHub even when its credential is configured
     assert.equal(url.origin, "https://resolver.example");
     assert.equal(url.searchParams.get("p"), "2");
     assert.equal(options.headers.Authorization, "Bearer private-token");
-    assert.equal(options.redirect, "error");
+    assert.equal(options.redirect, "manual");
     return Response.json({ status: "error", message: "upstream blocked" }, { status: 503 });
   });
   const response = await worker.fetch(new Request("https://gateway.example/v2?url=https://www.bilibili.com/video/BV14R4y1M7PF&p=2"), {
@@ -18,6 +18,7 @@ test("self-hosted mode never calls TikHub even when its credential is configured
   });
   assert.equal(response.status, 500);
   assert.equal(calls.length, 1);
+  assert.match((await response.json()).message, /503/);
   assert.equal(response.headers.get("Cache-Control"), "no-store");
 });
 
