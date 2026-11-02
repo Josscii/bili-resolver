@@ -52,6 +52,9 @@ async def main():
             if not line:
                 break
             item = json.loads(line)
+            if len(tasks) >= 32:
+                print(json.dumps({'id': item['id'], 'error': '解析请求繁忙，请稍后重试'}), flush=True)
+                continue
             task = asyncio.create_task(request(item))
             tasks.add(task)
             task.add_done_callback(tasks.discard)

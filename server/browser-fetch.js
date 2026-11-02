@@ -12,7 +12,8 @@ export function createBrowserFetch(python = process.env.BILI_PYTHON ?? '/opt/ven
     const process = spawn(python, [fileURLToPath(new URL('./browser-fetch.py', import.meta.url))], { stdio: ['pipe', 'pipe', 'inherit'] });
     child = process;
     const fail = (error) => {
-      if (child === process) child = undefined;
+      if (child !== process) return;
+      child = undefined;
       for (const { reject } of pending.values()) reject(error);
       pending.clear();
     };
