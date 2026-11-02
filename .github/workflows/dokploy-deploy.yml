@@ -5,45 +5,55 @@ on:
     branches:
       - codex/express-api-rewrite
   workflow_dispatch:
+    inputs:
+      deploy:
+        description: Trigger Dokploy after publishing
+        type: boolean
+        default: true
 
 concurrency:
   group: dokploy-${{ github.ref }}
   cancel-in-progress: true
-
-env:
-  REGISTRY: ghcr.io
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
     env:
+      ACR_IMAGE: ${{ vars.ACR_IMAGE }}
       DOKPLOY_WEBHOOK: ${{ secrets.DOKPLOY_WEBHOOK }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set image name
+      - name: Validate registry configuration
         id: vars
-        run: echo "image_name=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+        env:
+          ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
+          ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
+        run: |
+          test -n "$ACR_IMAGE" && test -n "$ACR_USERNAME" && test -n "$ACR_PASSWORD" || {
+            echo 'Configure ACR_IMAGE, ACR_USERNAME and ACR_PASSWORD before publishing.' >&2
+            exit 1
+          }
+          echo "registry=${ACR_IMAGE%%/*}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to GHCR
+      - name: Log in to ACR
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          registry: ${{ steps.vars.outputs.registry }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
 
       - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ steps.vars.outputs.image_name }}
+          images: ${{ env.ACR_IMAGE }}
           tags: |
             type=ref,event=branch
             type=sha
@@ -54,9 +64,12 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
+          platforms: linux/amd64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Trigger Dokploy redeploy
-        if: ${{ env.DOKPLOY_WEBHOOK != '' && github.ref == 'refs/heads/codex/express-api-rewrite' }}
+        if: ${{ vars.DOKPLOY_ACR_ENABLED == 'true' && env.DOKPLOY_WEBHOOK != '' && github.ref == 'refs/heads/codex/express-api-rewrite' && (github.event_name != 'workflow_dispatch' || inputs.deploy) }}
         run: curl --fail --show-error --silent "$DOKPLOY_WEBHOOK"
