@@ -3,3 +3,7 @@ npm-debug.log
 .git
 .github
 README.md
+
+.wrangler
+.dev.vars*
+test
